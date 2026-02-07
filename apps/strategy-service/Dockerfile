@@ -15,4 +15,5 @@ WORKDIR /app
 COPY --from=build /app/apps/strategy-service/dist ./dist
 COPY --from=build /app/apps/strategy-service/package.json ./package.json
 ENV NODE_ENV=production
+EXPOSE 4002
 CMD ["node", "dist/index.js"]
