@@ -12,6 +12,7 @@
   "dependencies": {
     "@sqts/shared-types": "0.1.0",
     "pino": "^9.4.0",
+    "redis": "^4.7.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
