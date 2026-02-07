@@ -1,0 +1,113 @@
+version: "3.9"
+
+services:
+  ingestion-service:
+    build:
+      context: /opt/memebot
+      dockerfile: apps/ingestion-service/Dockerfile
+    environment:
+      SOLANA_WS_URL: wss://api.mainnet-beta.solana.com
+      REDIS_URL: redis://${redis_host}:6379
+      REDIS_PUBLISH_TIMEOUT_MS: "2000"
+      REDIS_PUBLISH_RETRIES: "3"
+      REDIS_RETRY_DELAY_MS: "500"
+      DEFAULT_CREATOR: "system"
+      PORT: "4001"
+      LOG_LEVEL: "info"
+    ports:
+      - "4001:4001"
+
+  strategy-service:
+    build:
+      context: /opt/memebot
+      dockerfile: apps/strategy-service/Dockerfile
+    environment:
+      REDIS_URL: redis://${redis_host}:6379
+      SERVICE_PORT: "4002"
+      STRATEGY_MODE: "combined"
+      REDIS_PUBLISH_TIMEOUT_MS: "2000"
+    ports:
+      - "4002:4002"
+
+  risk-service:
+    build:
+      context: /opt/memebot
+      dockerfile: apps/risk-service/Dockerfile
+    environment:
+      REDIS_URL: redis://${redis_host}:6379
+      RISK_DAILY_LOSS_LIMIT_USD: "10000"
+      RISK_TOTAL_CAPITAL_USD: "200000"
+      RISK_MAX_TRADE_PCT: "0.05"
+      RISK_MIN_LIQUIDITY_USD: "75000"
+      RISK_MAX_HOLDER_CONCENTRATION_PCT: "0.2"
+      RISK_APPROVED_TOPIC: "risk_approved_orders"
+      RISK_DEAD_LETTER_TOPIC: "risk_dead_letter"
+      RISK_PUBLISH_TIMEOUT_MS: "2000"
+      PORT: "4003"
+      LOG_LEVEL: "info"
+    ports:
+      - "4003:4003"
+
+  execution-service:
+    build:
+      context: /opt/memebot
+      dockerfile: apps/execution-service/Dockerfile
+    environment:
+      SOLANA_RPC_URLS: https://api.mainnet-beta.solana.com
+      SOLANA_COMMITMENT: confirmed
+      SOLANA_RPC_MAX_RETRIES: "3"
+      SOLANA_RPC_RETRY_DELAY_MS: "500"
+      JUPITER_BASE_URL: https://quote-api.jup.ag/v6
+      JUPITER_SLIPPAGE_BPS: "50"
+      WALLET_ENCRYPTED_KEY: "00"
+      WALLET_SALT: "00"
+      WALLET_IV: "00"
+      WALLET_PASSPHRASE: "local-dev-passphrase"
+      REDIS_URL: redis://${redis_host}:6379
+      REDIS_PUBLISH_TIMEOUT_MS: "2000"
+      REDIS_PUBLISH_RETRIES: "3"
+      REDIS_RETRY_DELAY_MS: "500"
+      BASE_MINT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+      PRICE_API_URL: https://price.jup.ag/v4/price
+      MINT_DECIMALS: "{\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\": 6}"
+      EXECUTION_MAX_RETRIES: "3"
+      EXECUTION_RETRY_DELAY_MS: "500"
+      CONFIRMATION_COMMITMENT: confirmed
+      EXECUTION_CONCURRENCY: "4"
+      PORT: "4004"
+      LOG_LEVEL: "info"
+    ports:
+      - "4004:4004"
+
+  portfolio-service:
+    build:
+      context: /opt/memebot
+      dockerfile: apps/portfolio-service/Dockerfile
+    environment:
+      DATABASE_URL: postgres://${db_user}:${db_password}@${postgres_host}:5432/${db_name}
+      DATABASE_SSL: "false"
+      REDIS_URL: redis://${redis_host}:6379
+      PORT: "4005"
+      LOG_LEVEL: "info"
+    ports:
+      - "4005:4005"
+
+  backtesting-engine:
+    build:
+      context: /opt/memebot
+      dockerfile: apps/backtesting-engine/Dockerfile
+    environment:
+      PRICE_DATA_PATH: /app/data/prices.json
+      LIQUIDITY_DATA_PATH: /app/data/liquidity.json
+      SERVICE_PORT: "4010"
+    ports:
+      - "4010:4010"
+    volumes:
+      - /opt/memebot/infra/backtesting-data:/app/data:ro
+
+  ai-model-service:
+    build:
+      context: /opt/memebot
+      dockerfile: apps/ai-model-service/Dockerfile
+    ports:
+      - "5000:5000"

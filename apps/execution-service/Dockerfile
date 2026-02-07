@@ -1,6 +1,6 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ../../tsconfig.base.json ./
+COPY package.json package-lock.json* tsconfig.base.json ./
 COPY apps/execution-service/package.json ./apps/execution-service/package.json
 COPY packages/shared-types/package.json ./packages/shared-types/package.json
 COPY packages/solana-client/package.json ./packages/solana-client/package.json

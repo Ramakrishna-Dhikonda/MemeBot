@@ -1,6 +1,6 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ../../tsconfig.base.json ./
+COPY package.json package-lock.json* tsconfig.base.json ./
 COPY apps/strategy-service/package.json ./apps/strategy-service/package.json
 COPY packages/shared-types/package.json ./packages/shared-types/package.json
 RUN npm install --workspace @sqts/strategy-service --workspace @sqts/shared-types

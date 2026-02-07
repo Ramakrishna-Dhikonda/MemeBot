@@ -1,6 +1,6 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ../../tsconfig.base.json ./
+COPY package.json package-lock.json* tsconfig.base.json ./
 COPY apps/portfolio-service/package.json ./apps/portfolio-service/package.json
 RUN npm install --workspace @sqts/portfolio-service
 COPY apps/portfolio-service ./apps/portfolio-service

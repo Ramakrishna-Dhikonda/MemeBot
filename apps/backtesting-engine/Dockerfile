@@ -1,6 +1,6 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ../../tsconfig.base.json ./
+COPY package.json package-lock.json* tsconfig.base.json ./
 COPY apps/backtesting-engine/package.json ./apps/backtesting-engine/package.json
 COPY packages/shared-types/package.json ./packages/shared-types/package.json
 RUN npm install --workspace @sqts/backtesting-engine --workspace @sqts/shared-types
