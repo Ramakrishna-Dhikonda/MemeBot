@@ -4,6 +4,7 @@ export type EventTopic =
   | "whale_events"
   | "trade_signals"
   | "risk_approved_orders"
+  | "risk_dead_letter"
   | "execution_results"
   | "portfolio_updates";
 
@@ -45,6 +46,7 @@ export interface TradeSignal extends BaseEvent {
   side: "buy" | "sell";
   confidence: number;
   expectedSlippageBps: number;
+  sizeUsd?: number;
 }
 
 export interface RiskApprovedOrder extends BaseEvent {
@@ -54,6 +56,13 @@ export interface RiskApprovedOrder extends BaseEvent {
   side: "buy" | "sell";
   sizeUsd: number;
   maxSlippageBps: number;
+}
+
+export interface RiskRejectedSignal extends BaseEvent {
+  topic: "risk_dead_letter";
+  signalId: string;
+  mintAddress: string;
+  reason: string;
 }
 
 export interface ExecutionResult extends BaseEvent {
@@ -78,5 +87,6 @@ export type EventPayload =
   | IngestionEvent
   | TradeSignal
   | RiskApprovedOrder
+  | RiskRejectedSignal
   | ExecutionResult
   | PortfolioUpdate;
