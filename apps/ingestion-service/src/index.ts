@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createClient, type RedisClientType } from "redis";
+import { fileURLToPath } from "node:url";
+import express from "express";
+import Redis from "ioredis";
 import WebSocket from "ws";
 import pino from "pino";
 import {
@@ -15,7 +17,7 @@ import { z } from "zod";
 const ingestionConfigSchema = z.object({
   helius: z.object({
     wsUrl: z.string().url(),
-    apiKey: z.string().min(1),
+    apiKey: z.string().default(""),
     requestId: z.number().int().positive().default(1),
     maxRetries: z.number().int().positive().default(5),
     retryDelayMs: z.number().int().positive().default(1000),
@@ -23,9 +25,13 @@ const ingestionConfigSchema = z.object({
   }),
   redis: z.object({
     url: z.string().min(1),
-    publishTimeoutMs: z.number().int().positive().default(2000)
+    publishTimeoutMs: z.number().int().positive().default(2000),
+    publishRetries: z.number().int().nonnegative().default(3),
+    retryDelayMs: z.number().int().positive().default(500)
   }),
   defaultCreator: z.string().min(1),
+  logLevel: z.string().default("info"),
+  port: z.number().int().positive().default(4001),
   timestampProvider: z
     .function()
     .args()
@@ -85,12 +91,18 @@ export interface Publisher {
 }
 
 export class RedisPublisher implements Publisher {
-  private readonly client: RedisClientType;
-  private readonly logger = pino({ name: "ingestion-redis" });
+  private readonly client: Redis;
+  private readonly logger: pino.Logger;
   private connected = false;
 
-  constructor(private readonly url: string) {
-    this.client = createClient({ url });
+  constructor(
+    private readonly url: string,
+    private readonly publishRetries: number,
+    private readonly retryDelayMs: number,
+    logLevel: string
+  ) {
+    this.client = new Redis(this.url);
+    this.logger = pino({ name: "ingestion-redis", level: logLevel });
     this.client.on("error", (error) => {
       this.logger.error({ error: error.message }, "redis error");
     });
@@ -108,20 +120,38 @@ export class RedisPublisher implements Publisher {
   async publish(channel: string, payload: EventPayload, timeoutMs: number): Promise<void> {
     await this.connect();
     const message = JSON.stringify(payload);
-    const publishPromise = this.client.publish(channel, message);
-    await Promise.race([
-      publishPromise,
-      delay(timeoutMs).then(() => {
-        throw new Error("redis publish timeout");
-      })
-    ]);
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= this.publishRetries; attempt += 1) {
+      try {
+        const publishPromise = this.client.publish(channel, message);
+        await Promise.race([
+          publishPromise,
+          delay(timeoutMs).then(() => {
+            throw new Error("redis publish timeout");
+          })
+        ]);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("redis publish failed");
+        if (attempt < this.publishRetries) {
+          this.logger.warn(
+            { error: lastError.message, attempt: attempt + 1 },
+            "redis publish retry"
+          );
+          await delay(this.retryDelayMs * (attempt + 1));
+        }
+      }
+    }
+    if (lastError) {
+      throw lastError;
+    }
   }
 
   async disconnect(): Promise<void> {
     if (!this.connected) {
       return;
     }
-    await this.client.disconnect();
+    await this.client.quit();
     this.connected = false;
   }
 }
@@ -130,12 +160,15 @@ export class HeliusStreamClient {
   private socket: WebSocket | null = null;
   private shouldReconnect = true;
   private attempts = 0;
-  private readonly logger = pino({ name: "helius-stream" });
+  private readonly logger: pino.Logger;
 
   constructor(
     private readonly config: IngestionConfig["helius"],
-    private readonly onMessage: (tx: HeliusTransaction) => void
-  ) {}
+    private readonly onMessage: (tx: HeliusTransaction) => void,
+    logLevel: string
+  ) {
+    this.logger = pino({ name: "helius-stream", level: logLevel });
+  }
 
   start(): void {
     this.shouldReconnect = true;
@@ -151,7 +184,9 @@ export class HeliusStreamClient {
 
   private connect(): void {
     const url = new URL(this.config.wsUrl);
-    url.searchParams.set("api-key", this.config.apiKey);
+    if (this.config.apiKey) {
+      url.searchParams.set("api-key", this.config.apiKey);
+    }
     this.socket = new WebSocket(url.toString());
 
     this.socket.on("open", () => {
@@ -352,7 +387,7 @@ export class HeliusEventParser {
 
 export class IngestionService {
   private readonly config: IngestionConfig;
-  private readonly logger = pino({ name: "ingestion-service" });
+  private readonly logger: pino.Logger;
   private readonly publisher: Publisher;
   private readonly streamClient: HeliusStreamClient;
   private readonly parser: HeliusEventParser;
@@ -362,13 +397,25 @@ export class IngestionService {
     overrides?: { publisher?: Publisher; streamClient?: HeliusStreamClient }
   ) {
     this.config = ingestionConfigSchema.parse(config);
-    this.publisher = overrides?.publisher ?? new RedisPublisher(this.config.redis.url);
+    this.logger = pino({ name: "ingestion-service", level: this.config.logLevel });
+    this.publisher =
+      overrides?.publisher ??
+      new RedisPublisher(
+        this.config.redis.url,
+        this.config.redis.publishRetries,
+        this.config.redis.retryDelayMs,
+        this.config.logLevel
+      );
     this.parser = new HeliusEventParser(this.config);
     this.streamClient =
       overrides?.streamClient ??
-      new HeliusStreamClient(this.config.helius, (tx) => {
-      void this.handleTransaction(tx);
-    });
+      new HeliusStreamClient(
+        this.config.helius,
+        (tx) => {
+          void this.handleTransaction(tx);
+        },
+        this.config.logLevel
+      );
   }
 
   start(): void {
@@ -396,5 +443,93 @@ export class IngestionService {
 
   get eventParser(): HeliusEventParser {
     return this.parser;
+  }
+}
+
+const envSchema = z.object({
+  SOLANA_WS_URL: z.string().url(),
+  SOLANA_API_KEY: z.string().optional().default(""),
+  SOLANA_REQUEST_ID: z.coerce.number().int().positive().default(1),
+  SOLANA_MAX_RETRIES: z.coerce.number().int().positive().default(5),
+  SOLANA_RETRY_DELAY_MS: z.coerce.number().int().positive().default(1000),
+  SOLANA_WHALE_THRESHOLD_USD: z.coerce.number().positive().default(50000),
+  REDIS_URL: z.string().min(1),
+  REDIS_PUBLISH_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+  REDIS_PUBLISH_RETRIES: z.coerce.number().int().nonnegative().default(3),
+  REDIS_RETRY_DELAY_MS: z.coerce.number().int().positive().default(500),
+  DEFAULT_CREATOR: z.string().min(1).default("unknown"),
+  PORT: z.coerce.number().int().positive().default(4001),
+  LOG_LEVEL: z.string().default("info")
+});
+
+export function loadConfigFromEnv(): IngestionConfig {
+  const env = envSchema.parse(process.env);
+  return {
+    helius: {
+      wsUrl: env.SOLANA_WS_URL,
+      apiKey: env.SOLANA_API_KEY,
+      requestId: env.SOLANA_REQUEST_ID,
+      maxRetries: env.SOLANA_MAX_RETRIES,
+      retryDelayMs: env.SOLANA_RETRY_DELAY_MS,
+      whaleThresholdUsd: env.SOLANA_WHALE_THRESHOLD_USD
+    },
+    redis: {
+      url: env.REDIS_URL,
+      publishTimeoutMs: env.REDIS_PUBLISH_TIMEOUT_MS,
+      publishRetries: env.REDIS_PUBLISH_RETRIES,
+      retryDelayMs: env.REDIS_RETRY_DELAY_MS
+    },
+    defaultCreator: env.DEFAULT_CREATOR,
+    logLevel: env.LOG_LEVEL,
+    port: env.PORT,
+    timestampProvider: () => new Date().toISOString()
+  };
+}
+
+export async function startIngestionService(
+  config: IngestionConfig
+): Promise<{ service: IngestionService; close: () => Promise<void> }> {
+  const service = new IngestionService(config);
+  service.start();
+  const logger = pino({ name: "ingestion-health", level: config.logLevel });
+
+  const app = express();
+  app.get("/health", (_req, res) => {
+    res.status(200).json({ status: "ok" });
+  });
+
+  const server = app.listen(config.port, () => {
+    logger.info({ port: config.port }, "health endpoint listening");
+  });
+
+  const close = async (): Promise<void> => {
+    await service.stop();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  };
+
+  return { service, close };
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const logger = pino({ name: "ingestion-entry" });
+  try {
+    const config = loadConfigFromEnv();
+    logger.level = config.logLevel;
+    startIngestionService(config).catch((error) => {
+      logger.error({ error: error.message }, "failed to start ingestion service");
+      process.exitCode = 1;
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "failed to load config";
+    logger.error({ error: message }, "failed to start ingestion service");
+    process.exitCode = 1;
   }
 }
