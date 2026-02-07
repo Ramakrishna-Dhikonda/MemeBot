@@ -1,5 +1,5 @@
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { WalletManager } from "@sqts/wallet-manager";
 import { ExecutionService, type ExecutionConfig } from "../src/index.js";
 import type { RiskApprovedOrder } from "@sqts/shared-types";
@@ -21,7 +21,9 @@ const baseConfig: ExecutionConfig = {
   wallet: walletMaterial,
   redis: {
     url: "redis://localhost:6379",
-    publishTimeoutMs: 100
+    publishTimeoutMs: 100,
+    publishRetries: 0,
+    retryDelayMs: 1
   },
   baseMint: "USDC",
   priceApiUrl: "https://example.com/price",
@@ -31,6 +33,10 @@ const baseConfig: ExecutionConfig = {
   },
   maxRetries: 2,
   retryDelayMs: 1,
+  confirmationCommitment: "confirmed",
+  concurrency: 2,
+  port: 4004,
+  logLevel: "silent",
   timestampProvider: () => "2024-01-01T00:00:00.000Z"
 };
 
@@ -57,6 +63,12 @@ class MockOracle {
 class MockRpcPool {
   async sendRawTransaction(): Promise<string> {
     return "signature";
+  }
+
+  async withRetry<T>(
+    fn: (connection: { confirmTransaction: (signature: string) => Promise<void> }) => Promise<T>
+  ): Promise<T> {
+    return fn({ confirmTransaction: async () => undefined });
   }
 }
 
