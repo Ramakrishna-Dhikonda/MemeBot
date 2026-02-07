@@ -15,4 +15,5 @@ WORKDIR /app
 COPY --from=build /app/apps/backtesting-engine/dist ./dist
 COPY --from=build /app/apps/backtesting-engine/package.json ./package.json
 ENV NODE_ENV=production
+EXPOSE 4010
 CMD ["node", "dist/index.js"]
