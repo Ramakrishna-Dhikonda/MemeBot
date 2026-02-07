@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import {
   HeliusEventParser,
   IngestionService,
@@ -17,9 +16,13 @@ const baseConfig: IngestionConfig = {
   },
   redis: {
     url: "redis://localhost:6379",
-    publishTimeoutMs: 100
+    publishTimeoutMs: 100,
+    publishRetries: 1,
+    retryDelayMs: 5
   },
   defaultCreator: "creator",
+  logLevel: "silent",
+  port: 4001,
   timestampProvider: () => "2024-01-01T00:00:00.000Z"
 };
 
@@ -42,7 +45,10 @@ interface HeliusTxInput {
   feePayer?: string;
   tokenTransfers?: Array<{ mint?: string; tokenAmount?: number; tokenPrice?: number }>;
   nativeTransfers?: Array<{ amount?: number; price?: number }>;
-  events?: { liquidity?: { poolAddress?: string; mint?: string; liquidityUsd?: number }; token?: { mint?: string } };
+  events?: {
+    liquidity?: { poolAddress?: string; mint?: string; liquidityUsd?: number };
+    token?: { mint?: string };
+  };
 }
 
 describe("HeliusEventParser", () => {
@@ -93,6 +99,24 @@ describe("HeliusEventParser", () => {
     expect(events[0].topic).toBe("whale_events");
     expect(events[0].mintAddress).toBe("SOL");
   });
+
+  it("parses multiple event types in a single transaction", () => {
+    const parser = new HeliusEventParser(baseConfig);
+    const events = parser.parse({
+      type: "TOKEN_MINT_LIQUIDITY",
+      signature: "PoolSig",
+      feePayer: "creator-wallet",
+      tokenTransfers: [{ mint: "Mint2", tokenAmount: 1000, tokenPrice: 100 }],
+      events: {
+        token: { mint: "Mint111" },
+        liquidity: { poolAddress: "Pool1", mint: "Mint1", liquidityUsd: 120000 }
+      }
+    });
+
+    expect(events.map((event) => event.topic)).toEqual(
+      expect.arrayContaining(["new_token_events", "liquidity_events", "whale_events"])
+    );
+  });
 });
 
 describe("IngestionService", () => {
@@ -108,5 +132,24 @@ describe("IngestionService", () => {
     expect(events).toHaveLength(1);
     expect(publisher.published).toHaveLength(1);
     expect(publisher.published[0].channel).toBe("new_token_events");
+  });
+
+  it("publishes every event emitted by the parser", async () => {
+    const publisher = new MockPublisher();
+    const service = new IngestionService(baseConfig, { publisher });
+    const events = await service.handleTransaction({
+      type: "LIQUIDITY_ADD",
+      signature: "PoolSig",
+      tokenTransfers: [{ mint: "Mint2", tokenAmount: 1000, tokenPrice: 100 }],
+      events: {
+        liquidity: { poolAddress: "Pool1", mint: "Mint1", liquidityUsd: 120000 }
+      }
+    } as HeliusTxInput);
+
+    expect(events).toHaveLength(2);
+    expect(publisher.published).toHaveLength(2);
+    expect(publisher.published.map((item) => item.channel)).toEqual(
+      expect.arrayContaining(["liquidity_events", "whale_events"])
+    );
   });
 });

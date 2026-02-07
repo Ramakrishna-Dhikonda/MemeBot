@@ -15,4 +15,5 @@ WORKDIR /app
 COPY --from=build /app/apps/ingestion-service/dist ./dist
 COPY --from=build /app/apps/ingestion-service/package.json ./package.json
 ENV NODE_ENV=production
+EXPOSE 4001
 CMD ["node", "dist/index.js"]
