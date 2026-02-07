@@ -15,4 +15,5 @@ WORKDIR /app
 COPY --from=build /app/apps/risk-service/dist ./dist
 COPY --from=build /app/apps/risk-service/package.json ./package.json
 ENV NODE_ENV=production
+EXPOSE 4003
 CMD ["node", "dist/index.js"]
