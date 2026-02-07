@@ -1,5 +1,5 @@
 {
-  "name": "@sqts/risk-service",
+  "name": "@sqts/backtesting-engine",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -12,7 +12,6 @@
   "dependencies": {
     "@sqts/shared-types": "0.1.0",
     "pino": "^9.4.0",
-    "redis": "^4.7.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
