@@ -21,4 +21,5 @@ WORKDIR /app
 COPY --from=build /app/apps/execution-service/dist ./dist
 COPY --from=build /app/apps/execution-service/package.json ./package.json
 ENV NODE_ENV=production
+EXPOSE 4004
 CMD ["node", "dist/index.js"]
