@@ -1,0 +1,5 @@
+[
+  { "timestamp": "2024-01-01T00:00:00.000Z", "liquidityUsd": 75000 },
+  { "timestamp": "2024-01-01T00:01:00.000Z", "liquidityUsd": 82000 },
+  { "timestamp": "2024-01-01T00:02:00.000Z", "liquidityUsd": 79000 }
+]
